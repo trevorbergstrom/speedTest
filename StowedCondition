@@ -116,6 +116,7 @@ void loop() {
         clearLCDScreen(); 
         printResults(unitSpeed, getPassOrFail(MPH)); // print the speed
         digitalWrite(LEDTestInProgressPin, LOW); // turn off test in progress signal
+        
         break; // breaks out of loop
       }
     }
