@@ -1,0 +1,243 @@
+/**********************************************************************************************************************************
+ ** Author: Trevor Bergstrom
+ ** Date: 1/24/2017
+ ** Project Name: Genie Speed Test
+ ** Revision: 1.01
+ ** Description: This program tests the speed of a unit driving between two sensors. It displays the speed numericaly and visually.
+ **********************************************************************************************************************************/
+ 
+ /********************************************************************
+  **                         REVISION HISTORY                       **
+  ** REV.      DATE        DESC.              AUTHOR                **
+  ** 1.01 - 2/28/2017 - INITIAL RELEASE- TREVOR BERGSTROM           **
+  **                                                                **
+  **                                                                **
+  ********************************************************************/
+  
+ /******************************************************************************************************************
+  **                                               HARDWARE:
+  ** Arduino Board: keyeStudio UNO R3 Arduino
+  ** http://www.keyestudio.com/shop/keyestudio-uno-r3-development-board-usb-cable-compatible-for-arduino.html
+  **
+  ** LCD Screen : SainSmart IIC/I2C/TWI Serial 2004 20x4 LCD Module Shield for Arduino Raspberry Pi
+  ** http://www.sainsmart.com/sainsmart-iic-i2c-twi-serial-2004-20x4-lcd-module-shield-for-arduino-uno-mega-r3.html
+  *******************************************************************************************************************/
+
+// Included libraries to run LCD screen download libraries from: http://playground.arduino.cc/Code/LCDi2c
+// Liquid Crystal Libray is required to run this code
+// "Arduino.h" library should be added by default
+#include "Wire.h"
+#include "LiquidCrystal_I2C.h"
+
+#define I2C_ADDR  0x27 // Define I2C address for the screen on pins
+                       // A4-SDA (Data Line) & A5-SCL (Clock Line)
+                       // ARDUINO UNO R3, Default address is 0x27
+                       
+// pin mapping for LiquidCrystal Class
+#define BACKLIGHT_PIN 3
+#define En_pin  2
+#define Rw_pin  1
+#define Rs_pin  0
+#define D4_pin  4
+#define D5_pin  5
+#define D6_pin  6
+#define D7_pin  7
+
+LiquidCrystal_I2C lcd(I2C_ADDR,
+                      En_pin,Rw_pin,Rs_pin,D4_pin,D5_pin,D6_pin,D7_pin,
+                      BACKLIGHT_PIN, POSITIVE);
+
+// Constant declarations; sensor and LED pin numbering
+const int sensor1Pin = 5;
+const int sensor2Pin = 6;
+const int resetSwitch = 3;
+
+const int LEDHighPin = 4;
+const int LEDGoodPin = 10;
+const int LEDLowPin = 11;
+const int LEDTestInProgressPin = 12;
+
+/******************************************************************************************/
+ const double distance = 13; // distance in feet THIS SHOULD BE CHANGED IF TEST IS MOVED!
+/*******************************************************************************************/
+
+/*********************************************************************************************************************/
+
+void setup() {
+  Serial.begin(9600);
+  
+  lcd.begin(20,4); // 20 column by 4 row display
+  
+  // Initialize pins for output or input(using pullup against voltage spikes incorrectly triggering sensor)
+  pinMode(LEDHighPin, OUTPUT); // LED indicating speed is too fast
+  pinMode(LEDGoodPin, OUTPUT); // LED indicating correct unit speed
+  pinMode(LEDLowPin, OUTPUT); // LED indicating speed too slow
+  pinMode(LEDTestInProgressPin, OUTPUT); // FLASHING LED indicating that the test is in progress. 
+
+  pinMode(sensor1Pin, INPUT); // Start (triggering) sensor
+  pinMode(sensor2Pin, INPUT); // End sensor
+  pinMode(resetSwitch, INPUT_PULLUP); // Switch to reset test if in progress
+  printResults("00", "Please Begin Test");
+}
+
+/********************************************************************************************************************/
+
+void loop() {
+  
+  // variable declerations
+  int sensor1State = 0;
+  int sensor2State = 0;
+  int resetSwitchState = 0;
+  double elapsedTime = 0.0; // time between sensors
+  
+  sensor1State = digitalRead(sensor1Pin);
+  sensor2State = digitalRead(sensor2Pin);
+  
+  if (sensor1State == HIGH) { // if sensor 1 is crossed begin timing
+    digitalWrite(LEDTestInProgressPin, HIGH); // turn on test in progress signal
+    Serial.println("s1 crossed");
+    int i = 0;
+    
+    while (i<10000)  { //start timing loop max time out is 1000s
+      clearLCDScreen(); // clear data on lcd screen
+      printToLCD("TEST IN PROGRESS", 1,2); // printing "test in progress" to lcd screen
+      
+      delay(10); // .1s delay
+      elapsedTime += 0.1; // add .1s to elapsed time
+      i++; // add to max timeout counter
+      
+      sensor2State = digitalRead(sensor2Pin);
+      resetSwitchState = digitalRead(resetSwitch);
+      if (sensor2State == HIGH || resetSwitchState == LOW) { // if sensor 2 is crossed OR reset switch is pressed 
+        Serial.println(elapsedTime);
+        digitalWrite(LEDTestInProgressPin, LOW); // turn off test in progress signal
+        float MPH = getUnitSpeed(distance, elapsedTime); // function to calulate unit speed
+        String unitSpeed = speedToString(MPH); // function to convert unit speed to be displayed on lcd
+        clearLCDScreen(); 
+        printResults(unitSpeed, getPassOrFail(MPH)); // print the speed
+        digitalWrite(LEDTestInProgressPin, LOW); // turn off test in progress signal
+        break; // breaks out of loop
+      }
+    }
+  } else { // if no sensor is crossed continue to 'monitor' and wait for signal from sensor
+    elapsedTime = 0.0; // no time can be elasped
+  }
+
+}
+
+/*******************************************************
+ **               getPassOrFail function              **
+ **      takes MPH and reports if pass or fail        **
+ *******************************************************/
+ String getPassOrFail(float unitSpeed) {
+  String passFail = "";
+  
+ // Speed Values for Stowed test
+ const double speedMaxMiniStowed = 2.5; // upper acceptable speed limit (MPH) Mini
+ const double speedMaxLargeStowed = 2.0; // upper acceptable speed limit (MPH) Large
+ const double speedMinMiniStowed = 2.2; // lower acceptable speed limit (MPH) Mini
+ const double speedMinLargeStowed = 1.7; // lower acceptable speed limit (MPH) Large
+ 
+ // Speed Values for Un-Stowed Test
+ const double speedMaxUnstowed = 0.5;
+ const double speedMinUnstowed = 0.2; 
+ 
+ /* const int LEDHighPin = 9;
+ const int LEDGoodPin = 10;
+ const int LEDLowPin = 11; */
+ 
+  // comparisoin tests for stowed condition
+   if (unitSpeed > speedMaxMiniStowed) {
+    passFail = "Large-Fail Mini-Fail";
+  } else if (unitSpeed < speedMaxMiniStowed && unitSpeed > speedMinMiniStowed) {
+    passFail = "Large-Fail Mini-Pass";
+  } else if (unitSpeed < speedMinMiniStowed && unitSpeed > speedMaxLargeStowed) {
+    passFail = "Large-Fail Mini-Fail";
+  } else if (unitSpeed < speedMaxLargeStowed && unitSpeed > speedMinLargeStowed) {
+    passFail = "Large-Pass Mini-Fail";
+  } else {
+    passFail = "Large-Fail Mini-Fail";
+  } 
+  
+  // comparisoin tests for unstowed condition
+  /*
+  if (unitSpeed > speedMaxUnstowed) {
+    passFail = "Large-Fail Mini-Fail";
+  } else if ( unitSpeed < speedMinUnstowed) {
+    passFail = "Large-Fail Mini-Fail";
+  } else {
+    passFail = "Large-Pass Mini-Pass";
+  }
+  */
+  return passFail;
+ }
+
+/*******************************************************
+ **               getUnitSpeed function               **
+ **   takes distance and time, then converts to MPH   **
+ **   in string format.                               **
+ *******************************************************/
+ float getUnitSpeed(double travelDistance, double time) {
+   float speedFloat = (travelDistance / time) * 0.68181818;
+   
+   return speedFloat;
+ }
+ /*******************************************************
+ **               speedToString function               **
+ **   takes the unit speed in MPH and converts to      **
+ ** a string to print on LCD screen                    **
+ *******************************************************/
+ String speedToString(float speedFloat) { 
+  String unitSpeed = String(speedFloat, 3); 
+  
+  return unitSpeed;
+ }
+/*******************************************************
+ **               printResults function:              **
+ **              prints the screen format             **
+ *******************************************************/
+void printResults(String unitSpeed, String condition) {
+  
+  printToLCD("Genie SpeedTest", 0,0);
+  printToLCD("Stowed Condition", 1,0);
+  printToLCD("Speed: ", 2,0);
+  printToLCD(unitSpeed, 2,6);
+  printToLCD("MPH", 2,10);
+  printToLCD(condition, 3,0);
+}
+
+/*******************************************************
+ **              printToLCD function:                 **
+ ** this function prints specific lines on the screen **
+ *******************************************************/
+ 
+void printToLCD(String toPrint, int lineNumb, int cursorPosition) {
+  lcd.setBacklight(HIGH); // Turn on backlight, LOW for off
+  lcd.setCursor ( cursorPosition, lineNumb );            // go to the top left corner
+  lcd.print(toPrint); // write this string on the top row
+}
+
+/*******************************************************
+ **              clearLCDLine function:               **
+ **    this function clears the lines on the screen   **
+ *******************************************************/
+ 
+void clearLCDChars(int lineNumb, int cursorPosition, int numToClear) {
+  lcd.setCursor ( cursorPosition, lineNumb );
+  
+  for (int i = 1; i <= numToClear; i++) {
+    lcd.print(" ");
+  }
+}
+
+/*******************************************************
+ **            clearLCDScreen function:               **
+ ** this function clears ALL the lines on the screen  **
+ *******************************************************/
+ 
+void clearLCDScreen() {
+  clearLCDChars (0,0,20);
+  clearLCDChars (1,0,20);
+  clearLCDChars (2,0,20);
+  clearLCDChars (3,0,20);
+}
